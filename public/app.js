@@ -12,6 +12,8 @@ const pct = (v) => v == null ? '—' : `${Number(v) > 0 ? '+' : ''}${Number(v).t
 const price = (v) => v == null ? '—' : Number(v).toFixed(2);
 const oneK = (v) => v == null ? '—' : '$' + Math.round(1000 * (1 + Number(v) / 100)).toLocaleString('en-AU');
 const dollars = (v) => v == null ? '—' : '$' + Number(v).toLocaleString('en-AU');
+const num = (v) => v == null ? '—' : Number(v).toLocaleString('en-AU');
+const rate = (v) => v == null ? '—' : Number(v).toFixed(4);
 const link = (u, label) => u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>` : '';
 const load = async (url) => { try { const r = await fetch(url, {cache:'no-store'}); return r.ok ? await r.json() : null; } catch { return null; } };
 let events = {statements:[],reactions:[]}, state = {q:'', id:null};
@@ -58,10 +60,34 @@ function renderHistory(data) {
     <td>${esc(r.verdict)}${r.data_mismatch ? ' ⚠' : ''}</td><td title="${esc(r.note)}">${link(r.source_url,'src ↗')}</td></tr>`).join('')}</tbody></table></div>
     <p class="meta">Daily closes from Yahoo Finance, matched to the same window; not proof that a trade was available at the quoted price.</p>` : '<p>History feed empty.</p>');
 }
+function renderSmart(data) {
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  $('#smart-rows').innerHTML = `<p class="meta">${rows.length ? `As of ${esc(syd(data.as_of))}` : 'No smart-money data yet'}</p>` + (rows.length ? `<div class="table-wrap"><table><thead><tr><th>Statement</th><th>Asset</th><th>5m vol ×typical</th><th>1h vol ×typical</th><th>Prior session vol</th><th>Pre-5m move</th><th>Pre-1h up-vol</th><th>Buy $1k before → after</th><th>Short $1k before → after</th><th>Score</th><th>Source</th></tr></thead><tbody>${rows.map(r => `<tr>
+    <td>${esc(r.headline)}${r.time_estimated ? ' <span class="meta">(time proxy)</span>' : ''}</td><td>${esc(r.asset)}</td>
+    <td>${num(r.pre_5m_vs_typical)}${r.pre_5m_volume == null ? '' : `<div class="meta">${num(r.pre_5m_volume)} shares</div>`}</td>
+    <td>${num(r.pre_1h_vs_typical)}${r.pre_1h_volume == null ? '' : `<div class="meta">${num(r.pre_1h_volume)} shares</div>`}</td>
+    <td>${num(r.prior_day_volume)}</td><td>${pct(r.pre_5m_move_pct)}</td>
+    <td>${r.pre_1h_up_volume_share == null ? '—' : `${Number(r.pre_1h_up_volume_share).toFixed(1)}%`}</td>
+    <td>${dollars(r.buy_1000_before)} → ${dollars(r.buy_1000_after)}</td>
+    <td>${dollars(r.short_1000_before)} → ${dollars(r.short_1000_after)}</td>
+    <td>${r.smart_score == null ? '—' : Number(r.smart_score)}</td>
+    <td>${link(r.source_url,'src ↗')}<div class="meta" title="${esc(r.note)}">${esc(r.note)}</div></td></tr>`).join('')}</tbody></table></div>
+    <p class="meta">Score is a descriptive blend of pre-event volume ratios, not a prediction. Short figures show the net cash from selling $1,000 of stock then covering at the measured close.</p>` : '<p>Smart money feed empty.</p>');
+}
+function renderFx(data) {
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  $('#fx-rows').innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Statement</th><th>Asset</th><th>AUD/USD before → after</th><th>Move</th><th>A$1k → US$ before / after</th><th>GBP/USD before → after</th><th>Move</th><th>£1k → US$ before / after</th></tr></thead><tbody>${rows.map(r => `<tr>
+    <td>${esc(r.headline)}</td><td>${esc(r.asset)}</td>
+    <td>${rate(r.audusd_before)} → ${rate(r.audusd_after)}</td><td>${pct(r.audusd_move_pct)}</td>
+    <td>${dollars(r.aud1000_to_usd_before)} / ${dollars(r.aud1000_to_usd_after)}</td>
+    <td>${rate(r.gbpusd_before)} → ${rate(r.gbpusd_after)}</td><td>${pct(r.gbpusd_move_pct)}</td>
+    <td>${dollars(r.gbp1000_to_usd_before)} / ${dollars(r.gbp1000_to_usd_after)}</td></tr>`).join('')}</tbody></table></div>
+    <p class="meta">Quotes are Yahoo 5-minute or hourly FX bars at the same before/after points. AUD/USD and GBP/USD are USD per unit of local currency; rates are rounded to four decimals.</p>` : '<p>FX feed empty.</p>';
+}
 (async () => {
-  const [ev, watch, hist] = await Promise.all([load('events.json'), load('watch.json'), load('history.json')]);
+  const [ev, watch, hist, smart] = await Promise.all([load('events.json'), load('watch.json'), load('history.json'), load('smart.json')]);
   events = ev && Array.isArray(ev.statements) ? ev : {statements:[],reactions:[]};
-  renderList(); renderWatch(watch); renderHistory(hist);
+  renderList(); renderWatch(watch); renderSmart(smart); renderFx(smart); renderHistory(hist);
   const hash = location.hash.slice(1);
   if (hash && events.statements.some(s => s.statement_id === hash)) select(hash);
   $('#filters').querySelector('input').addEventListener('input', (e) => { state.q = e.target.value; renderList(); });
