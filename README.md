@@ -18,6 +18,10 @@ files and works on Vercel with `outputDirectory: public`.
   `history/backfill.py`: daily closes for the asset versus a sector ETF over
   each curated window.
 - `public/podium.svg`, `public/loupe.svg` — original cartoon illustrations.
+- The site shows a "$1k" column: what a $1,000 notional entry at the recorded
+  proxy price would be worth at the measured close/T+2 mark, and (in the
+  history feed) at the latest daily close when the backfill ran. These are
+  illustrations from closing prices, not statements about a real fill.
 - `.github/workflows/watch.yml` — scheduled tick that fetches a public Trump
   post archive, applies the pre-registered rule, and commits only `watch.json`.
 

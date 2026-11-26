@@ -46,6 +46,17 @@ def fetch_bars(symbol: str, start: dt.datetime, end: dt.datetime) -> list[tuple[
     return sorted(set(bars))
 
 
+def latest_bar(symbol: str) -> tuple[dt.date, float] | None:
+    url = f"{CHART}{urllib.parse.quote(symbol)}?range=5d&interval=1d"
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=25) as r:
+        result = json.loads(r.read())["chart"]["result"][0]
+    pairs = [(dt.datetime.fromtimestamp(t, NY).date(), float(c))
+             for t, c in zip(result["timestamp"], result["indicators"]["quote"][0]["close"])
+             if c is not None]
+    return sorted(pairs)[-1] if pairs else None
+
+
 def window_return(series: list[tuple[dt.date, float]], start: dt.date, end: dt.date) -> tuple[float | None, float | None, float | None]:
     """Baseline is the last close on/before start; end is the last close on/before end.
 
@@ -112,7 +123,7 @@ def candidates(events: dict) -> list[dict]:
     return out
 
 
-def build_rows(events: dict, fetch=fetch_bars) -> list[dict]:
+def build_rows(events: dict, fetch=fetch_bars, latest_fetch=None) -> list[dict]:
     items = candidates(events)
     # Fetch each symbol once across the full span of every window that uses it.
     ranges: dict[str, tuple[dt.date, dt.date]] = {}
@@ -124,6 +135,13 @@ def build_rows(events: dict, fetch=fetch_bars) -> list[dict]:
     for symbol, (lo, hi) in ranges.items():
         cache[symbol] = fetch(symbol, dt.datetime.combine(lo, dt.time(), NY),
                               dt.datetime.combine(hi, dt.time(), NY))
+    latest = {}
+    if latest_fetch:
+        for symbol in ranges:
+            try:
+                latest[symbol] = latest_fetch(symbol)
+            except Exception:
+                latest[symbol] = None
     rows = []
     for item in items:
         a0, a1, asset_pct = window_return(cache[item["asset"]], item["start"], item["end"])
@@ -136,7 +154,7 @@ def build_rows(events: dict, fetch=fetch_bars) -> list[dict]:
         note = "Daily closes are a price proxy; the curated event may report a different quoted entry."
         if mismatch:
             note += f' Yahoo close series ({asset_pct}%) differs from the curated {reported}% move; treat this row as unverified.'
-        rows.append({
+        row = {
             "statement_id": reaction["statement_id"],
             "reaction_id": reaction["reaction_id"],
             "headline": statement.get("headline", ""),
@@ -145,6 +163,8 @@ def build_rows(events: dict, fetch=fetch_bars) -> list[dict]:
             "horizon": reaction["horizon"],
             "window": f'{item["start"]} to {item["end"]}', "window_basis": item["basis"],
             "asset_start_close": a0, "asset_end_close": a1,
+            "value_1000_at_end": round(1000 * a1 / a0) if a0 and a1 else None,
+            "latest_close": None, "latest_date": None, "value_1000_now": None,
             "asset_return_pct": asset_pct,
             "curated_reported_pct": reported,
             "data_mismatch": mismatch,
@@ -154,7 +174,14 @@ def build_rows(events: dict, fetch=fetch_bars) -> list[dict]:
             "price_source": "Yahoo Finance chart API, daily closes",
             "source_url": reaction.get("source_url", ""),
             "note": note,
-        })
+        }
+        pair = latest.get(item["asset"])
+        if pair and a0:
+            latest_date, latest_close = pair
+            row["latest_date"] = latest_date.isoformat()
+            row["latest_close"] = round(latest_close, 4)
+            row["value_1000_now"] = round(1000 * latest_close / a0)
+        rows.append(row)
     return rows
 
 
@@ -162,9 +189,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
-    rows = build_rows(json.loads(EVENTS.read_text()))
+    rows = build_rows(json.loads(EVENTS.read_text()), latest_fetch=latest_bar)
     result = {"as_of": dt.datetime.now(dt.timezone.utc).isoformat(),
-              "method": "daily closes, asset vs sector ETF over the curated window; no look-ahead",
+              "method": "daily closes, asset vs sector ETF over the curated window; no look-ahead; 'now' is the latest daily close at generation time",
               "rows": rows}
     if args.dry_run:
         print(json.dumps(result, indent=2)[:4000])
