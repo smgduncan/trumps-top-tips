@@ -1,0 +1,39 @@
+name: Observation desk
+
+on:
+  schedule:
+    # Every 15 minutes, US market hours and one overnight sweep (UTC).
+    - cron: '*/15 13-21 * * 1-5'
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: observation-desk
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test
+        run: python3 -m unittest discover -s watch -p 'test_*.py'
+      - name: Run paper watch
+        run: python3 watch/desk.py
+      - name: Commit journal only if changed
+        run: |
+          git config user.name "stubot[bot]"
+          git config user.email "stubot@users.noreply.github.com"
+          if git diff --quiet -- public/watch.json; then
+            echo "No new signals"
+          else
+            git add public/watch.json
+            git commit -m "chore: update paper observation journal"
+            git push
+          fi
